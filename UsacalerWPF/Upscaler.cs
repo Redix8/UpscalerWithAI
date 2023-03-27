@@ -1,0 +1,343 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using System.IO;
+using System.Diagnostics;
+using Microsoft.ML.OnnxRuntime;
+using Microsoft.ML.OnnxRuntime.Tensors;
+using Emgu.CV;
+using Emgu.CV.Structure;
+using System.ComponentModel;
+using System.Windows.Controls;
+using System.Windows;
+
+namespace UpscalerWPF
+{
+    class Upscaler
+    {
+        public int batchSize = 1;
+        public int scale { get; set; } = 2;
+        public string filePath = "";
+        public string modelName { get; set; } = "SwinIR-M";
+        private string modelPath = "003_realSR_BSRGAN_DFO_s64w8_SwinIR-M_x2_GAN.ONNX";
+        
+        public void setModel(string modelName, int scale)
+        {
+            this.modelName = modelName;
+            this.scale = scale;
+            if (modelName == "SwinIR-M")
+            {
+                modelPath = "003_realSR_BSRGAN_DFO_s64w8_SwinIR-M_x2_GAN.ONNX";
+                this.scale = 2;
+            }
+            else if (modelName == "BSRGAN")
+            {
+                if (scale == 2)
+                {
+                    modelPath = "BSRGANx2.onnx";
+                }
+                else
+                {
+                    modelPath = "BSRGAN.onnx";
+                }
+            }
+        }
+        
+        private float clamp(float number, float min, float max)
+        {
+            if (number < min)
+            {
+                return min;
+            }
+            else if (number > max)
+            {
+                return max;
+            }
+            else
+            {
+                return number;
+            }
+        }
+        private Tensor<float> toTensor(Mat[] mat, int height, int width, int batchSize)
+        {
+            // bgr Mat to rgb normalized tensor 
+            // swinIR model option window_size = 8
+            int window_size = 8;
+            int h_pad = 0;
+            int w_pad = 0;
+            if (height % window_size > 0)
+            {
+                h_pad = (height / window_size + 1) * window_size - height;
+            }
+            if (width % window_size > 0)
+            {
+                w_pad = (width / window_size + 1) * window_size - width;
+            }            
+            
+            Tensor<float> tensor = new DenseTensor<float>(new[] { batchSize, 3, height+h_pad, width+w_pad });
+            
+            for (int b = 0; b<batchSize; b++)
+            {
+                Image<Rgb, byte> tmp = mat[b].ToImage<Rgb, byte>();
+                for (int y = 0; y < height; y++)
+                {
+                    for (int x = 0; x < width; x++)
+                    {
+                        
+                        tensor[b, 0, y, x] = tmp.Data[y, x, 0] / 255f;
+                        tensor[b, 1, y, x] = tmp.Data[y, x, 1] / 255f;
+                        tensor[b, 2, y, x] = tmp.Data[y, x, 2] / 255f;
+                    }
+                }
+            }            
+            return tensor;
+        }
+        
+        private Mat[] toMat(Tensor<float> tensor, int height, int width, int batchSize)
+        {
+            Mat[] frames = new Mat[batchSize];
+            for (int b = 0; b<batchSize; b++)
+            {
+                var frame = new Mat(height * this.scale, width * this.scale, Emgu.CV.CvEnum.DepthType.Cv8U, 3).ToImage<Rgb, Byte>();
+                for (int y = 0; y < height * this.scale; y++)
+                {
+                    for (int x = 0; x < width * this.scale; x++)
+                    {
+                        frame.Data[y, x, 0] = (byte)(clamp(tensor[b, 0, y, x], 0, 1) * 255);
+                        frame.Data[y, x, 1] = (byte)(clamp(tensor[b, 1, y, x], 0, 1) * 255);
+                        frame.Data[y, x, 2] = (byte)(clamp(tensor[b, 2, y, x], 0, 1) * 255);
+                    }
+                }
+                frames[b] = frame.Mat;
+            }            
+            return frames;
+        }
+
+        private Tensor<Float16> toTensorFP16(Mat[] mat, int height, int width, int batchSize)
+        {
+            // bgr Mat to rgb normalized tensor 
+            // swinIR model option window_size = 8
+            int window_size = 8;
+            int h_pad = 0;
+            int w_pad = 0;
+            if (height % window_size > 0)
+            {
+                h_pad = (height / window_size + 1) * window_size - height;
+            }
+            if (width % window_size > 0)
+            {
+                w_pad = (width / window_size + 1) * window_size - width;
+            }
+
+            Tensor<Float16> tensor = new DenseTensor<Float16>(new[] { batchSize, 3, height + h_pad, width + w_pad });
+
+            for (int b = 0; b < batchSize; b++)
+            {
+                Image<Rgb, byte> tmp = mat[b].ToImage<Rgb, byte>();
+                for (int y = 0; y < height; y++)
+                {
+                    for (int x = 0; x < width; x++)
+                    {
+
+                        tensor[b, 0, y, x] = (Float16)(tmp.Data[y, x, 0] / 255f);
+                        tensor[b, 1, y, x] = (Float16)(tmp.Data[y, x, 1] / 255f);
+                        tensor[b, 2, y, x] = (Float16)(tmp.Data[y, x, 2] / 255f);
+                    }
+                }
+            }
+            return tensor;
+        }
+
+        private Mat[] toMatFP16(Tensor<Float16> tensor, int height, int width, int batchSize)
+        {
+            Mat[] frames = new Mat[batchSize];
+            for (int b = 0; b < batchSize; b++)
+            {
+                var frame = new Mat(height * this.scale, width * this.scale, Emgu.CV.CvEnum.DepthType.Cv8U, 3).ToImage<Rgb, Byte>();
+                for (int y = 0; y < height * this.scale; y++)
+                {
+                    for (int x = 0; x < width * this.scale; x++)
+                    {
+                        frame.Data[y, x, 0] = (byte)(tensor[b, 0, y, x] * 255);
+                        frame.Data[y, x, 1] = (byte)(tensor[b, 1, y, x] * 255);
+                        frame.Data[y, x, 2] = (byte)(tensor[b, 2, y, x] * 255);
+                    }
+                }
+                frames[b] = frame.Mat;
+            }
+            return frames;
+        }
+
+        public void DoUpscaling(BackgroundWorker worker, DoWorkEventArgs e)
+        {
+
+            var session = new InferenceSession(modelPath, SessionOptions.MakeSessionOptionWithCudaProvider(0));
+            VideoCapture capture = new VideoCapture(this.filePath);
+                        
+            string savePath = "upscaled_" + Path.GetFileName(this.filePath);
+            int width = (int)capture.Get(Emgu.CV.CvEnum.CapProp.FrameWidth);
+            int height = (int)capture.Get(Emgu.CV.CvEnum.CapProp.FrameHeight);
+            System.Drawing.Size size = new System.Drawing.Size(width*this.scale, height*this.scale);
+            double fps = capture.Get(Emgu.CV.CvEnum.CapProp.Fps);
+            
+            int totalFrame = (int)capture.Get(Emgu.CV.CvEnum.CapProp.FrameCount);
+            int backend_idx = 0;
+            
+            foreach(Backend be in CvInvoke.WriterBackends)
+            {
+                if (be.Name.Equals("MSMF"))
+                {
+                    backend_idx = be.ID;
+                    break;
+                }
+            }
+            VideoWriter writer = new VideoWriter(savePath, backend_idx, VideoWriter.Fourcc('H', '2', '6', '4'), fps, size, true);
+            bool isFloat16 = this.modelPath.Contains("fp16");
+            Stopwatch stopwatch = new Stopwatch();
+            Stopwatch stepwatch = new Stopwatch();
+            stopwatch.Start();
+            
+            while (true)
+            {
+                if (worker.CancellationPending)
+                {
+                    e.Cancel = true;
+                    break;
+                }
+                else
+                {
+                    
+                    stepwatch.Start();
+                    Mat[] frames = new Mat[this.batchSize];
+                    int lastBatchIdx = 0;
+                    for (int i = 0; i < this.batchSize; i++)
+                    {
+                        Mat frame = capture.QueryFrame(); // bgr frame
+                        if (frame == null) break;
+                        lastBatchIdx = i;
+                        frames[i] = frame;
+                    }
+                    var pos = (int)capture.Get(Emgu.CV.CvEnum.CapProp.PosFrames);
+
+                    if (isFloat16)
+                    {
+                        Tensor<Float16> tensor = toTensorFP16(frames, height, width, lastBatchIdx + 1);
+
+                        var inputs = new List<NamedOnnxValue> { NamedOnnxValue.CreateFromTensor("input", tensor) };
+
+                        Tensor<Float16> output = session.Run(inputs).ToList().First().Value as Tensor<Float16>;
+
+                        var up_frames = toMatFP16(output, height, width, lastBatchIdx + 1);
+
+                        for (int i = 0; i < lastBatchIdx + 1; i++)
+                        {
+                            writer.Write(up_frames[i]);
+                        }
+                    }
+                    else
+                    {
+                        Tensor<float> tensor = toTensor(frames, height, width, lastBatchIdx + 1);
+
+                        var inputs = new List<NamedOnnxValue> {NamedOnnxValue.CreateFromTensor("input", tensor)};
+
+                        Tensor<float> output = session.Run(inputs).ToList().First().Value as Tensor<float>;
+                        
+                        var up_frames = toMat(output, height, width, lastBatchIdx + 1);
+                        
+                        for (int i = 0; i < lastBatchIdx + 1; i++)
+                        {
+                            writer.Write(up_frames[i]);
+                        }
+                    }
+                    stepwatch.Stop();
+                    // finished
+                    int futureWork = totalFrame - pos;
+                    TimeSpan workingTime = new TimeSpan(stepwatch.ElapsedMilliseconds*10000*futureWork);
+
+                    string format = @"hh\:mm\:ss";                    
+                    int percentComplete = (int)((float)pos / (float)totalFrame * 100);
+                    String[] time = {stopwatch.Elapsed.ToString(format), workingTime.ToString(format), "Video Converting"};
+                    worker.ReportProgress(percentComplete, time);
+                    stepwatch.Reset();
+                    if (pos == totalFrame) break;
+                }                
+            }
+            capture.Dispose();
+            writer.Dispose();
+            session.Dispose();
+            stopwatch.Stop();
+            FFmpegConvert(savePath);
+        }
+        private void FFmpegConvert(string input)
+        {
+            Process proc = new Process();
+            string cmd = $"-i {filePath} -i {input} -map 1:v -map 0:a -c:a copy -c:v libx264 -pix_fmt yuv420p -progress nostat encoded_{input}";
+            proc.StartInfo.FileName = ".\\ffmpeg\\bin\\ffmpeg.exe";
+            proc.StartInfo.Arguments = cmd;
+            proc.StartInfo.UseShellExecute = false;
+            proc.StartInfo.WindowStyle = ProcessWindowStyle.Hidden;
+            proc.StartInfo.RedirectStandardError = true;
+            proc.StartInfo.RedirectStandardOutput = true;
+            proc.StartInfo.CreateNoWindow = true;
+            var err = proc.Start();
+            StreamReader sr = proc.StandardError;
+            while (!sr.EndOfStream)
+            {
+                getTotalSecondProcessed(sr.ReadLine());
+            }            
+        }
+
+        private void getTotalSecondProcessed(string line)
+        {
+            try
+            {
+                string[] split = line.Split(" ");
+                foreach (var row in split)
+                {
+                    if (row.StartsWith("time="))
+                    {
+                        var time = row.Split("=");                        
+                    }
+                }
+            }
+            catch { }
+        }
+        
+        public void inference()
+        {
+            var session = new InferenceSession(modelPath, SessionOptions.MakeSessionOptionWithCudaProvider(0));
+            Image<Rgb, Byte> img = new Image<Rgb, byte>(this.filePath);
+            // CHW-RGB to NCHW-RGB
+            Tensor<float> input = new DenseTensor<float>(new[] { 1, 3, 720, 1280 });
+            for (int y = 0; y < img.Height; y++)
+            {                
+                for (int x = 0; x < img.Width; x++)
+                {
+                    input[0, 0, y, x] = img.Data[y, x, 0] / 255f;
+                    input[0, 1, y, x] = img.Data[y, x, 1] / 255f;
+                    input[0, 2, y, x] = img.Data[y, x, 2] / 255f;
+                }
+            }
+            var inputs = new List<NamedOnnxValue>
+            {
+                NamedOnnxValue.CreateFromTensor("input", input)
+            };
+            IDisposableReadOnlyCollection<DisposableNamedOnnxValue> output = session.Run(inputs);
+            var tensor = (output.ToList().First().Value as Tensor<float>);
+            var result = new Mat(720*2, 1280*2, Emgu.CV.CvEnum.DepthType.Cv8U, 3).ToImage<Rgb, Byte>();
+            
+            for (var y = 0; y < 720 * 2; y++)
+            {
+                for (var x = 0; x < 1280 * 2; x++)
+                {
+                    result.Data[y, x, 0] = (byte)(tensor[0, 0, y, x]*255);
+                    result.Data[y, x, 1] = (byte)(tensor[0, 1, y, x]*255);
+                    result.Data[y, x, 2] = (byte)(tensor[0, 2, y, x]*255);
+                }
+            }
+            result.Save("upscaled.png");
+        }
+    }
+}
