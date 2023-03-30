@@ -38,18 +38,6 @@ namespace UpscalerWPF
             inferenceWorker.RunWorkerCompleted += new RunWorkerCompletedEventHandler(inferenceWorker_RunWorkerCompleted);
             inferenceWorker.ProgressChanged += new ProgressChangedEventHandler(inferenceWorker_ProgressChanged);
         }
-        //private void InitializeFFMPEG()
-        //{
-        //    Console.WriteLine("Current directory: " + Environment.CurrentDirectory);
-        //    Console.WriteLine("Running in {0}-bit mode.", Environment.Is64BitProcess ? "64" : "32");
-        //    string ffmpegBinaryPath = System.IO.Path.Combine(Environment.CurrentDirectory, "ffmpeg", "bin", "x64");
-        //    
-        //    ffmpeg.RootPath = ffmpegBinaryPath;
-        //    //DynamicallyLoadedBindings.LibrariesPath = ffmpegBinaryPath;
-        //    //DynamicallyLoadedBindings.Initialize();
-        //    Console.WriteLine($"FFmpeg version info: {ffmpeg.av_version_info()}");
-        //    
-        //}
 
         private void inferenceWorker_DoWork(object sender, DoWorkEventArgs e)
         {
@@ -132,9 +120,20 @@ namespace UpscalerWPF
             if (upscaler == null) return;
             var item = (ComboBoxItem)modelSelect.SelectedItem;
             var modelName = item.Content.ToString();
-            
+            bool isTensorRTSupportedModel = Array.Exists(upscaler.TensorRTSupportModels, model => model == modelName);
+
             upscaler.modelName = modelName;
             upscaler.setModel(upscaler.modelName, upscaler.scale);
+            
+            if (isTensorRTSupportedModel)
+            {
+                isTensorRT.IsEnabled = true;                
+            }
+            else {
+                isTensorRT.IsEnabled = false;
+                isTensorRT.IsChecked = false;
+            }
+            
         }
 
         private void radio2x_Checked(object sender, RoutedEventArgs e)
@@ -154,6 +153,24 @@ namespace UpscalerWPF
         private void isTensorRT_Checked(object sender, RoutedEventArgs e)
         {
             upscaler.useTensorRT = (bool)isTensorRT.IsChecked;
+            isFP16.IsEnabled = true;
+        }
+
+        private void isTensorRT_Unchecked(object sender, RoutedEventArgs e)
+        {
+            upscaler.useTensorRT = (bool)isTensorRT.IsChecked;
+            isFP16.IsChecked = false;
+            isFP16.IsEnabled = false;
+        }
+
+        private void isFP16_Checked(object sender, RoutedEventArgs e)
+        {
+            upscaler.useFP16 = (bool)isFP16.IsChecked;
+        }
+
+        private void isFP16_Unchecked(object sender, RoutedEventArgs e)
+        {
+            upscaler.useFP16 = (bool)isFP16.IsChecked;
         }
     }
 }

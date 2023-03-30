@@ -6,7 +6,7 @@
         xmlns:local="clr-namespace:UpscalerWPF"        
         mc:Ignorable="d"
         Loaded="Window_Loaded"
-        Title="MainWindow" Height="500" Width="800">        
+        Title="MainWindow" Height="500" Width="800">
     <Grid>
         <Button x:Name="openBtn" Content="OPEN" HorizontalAlignment="Left" Margin="71,215,0,0" VerticalAlignment="Top" RenderTransformOrigin="-0.509,0.572" Height="30" Width="60" Click="openBtn_Click"/>
         <TextBox x:Name="path" HorizontalAlignment="Left" Margin="206,219,0,0" TextWrapping="Wrap" VerticalAlignment="Top" Width="467" Height="26" FontSize="14"/>
@@ -15,7 +15,7 @@
         <Button x:Name="cancelBtn" Content="CANCEL" HorizontalAlignment="Left" Margin="156,381,0,0" VerticalAlignment="Top" IsEnabled="False" Width="60" Height="30" Click="cancelBtn_Click"/>
         <ComboBox x:Name="modelSelect" HorizontalAlignment="Left" Margin="71,259,0,0" VerticalAlignment="Top" Width="120" SelectedIndex="0" SelectionChanged="modelSelect_SelectionChanged">
             <ComboBoxItem Content="BSRGAN"/>
-            <ComboBoxItem Content="SwinIR-M"/>            
+            <ComboBoxItem Content="SwinIR-M"/>
         </ComboBox>
         <GroupBox x:Name="scale" Header="Scale" Width="95" Height="85" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="223,259,0,0">
             <StackPanel Margin="0,0,16,0">
@@ -25,7 +25,7 @@
         </GroupBox>
         <ProgressBar x:Name="progressBar" HorizontalAlignment="Left" Height="20" Margin="255,386,0,0" VerticalAlignment="Top" Width="418"/>
 
-        <GroupBox Margin="348,259,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Height="85" Width="232" Header="Batch Size">
+        <GroupBox Margin="335,259,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Height="85" Width="232" Header="Batch Size">
             <DockPanel Margin="10,10,10,10">
                 <TextBox Text="{Binding Value, ElementName=batchSize}" DockPanel.Dock="Left" Margin="0,0,0,0" Width="25" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" RenderTransformOrigin="0.32,2.253" Height="24"/>
                 <Slider x:Name="batchSize" Minimum="1" Maximum="8" Value="1" SmallChange="1" TickPlacement="TopLeft" AutoToolTipPlacement="TopLeft" IsSnapToTickEnabled="True" DockPanel.Dock="Left" Width="156" Height="30"/>
@@ -34,7 +34,9 @@
         <TextBlock x:Name="state" HorizontalAlignment="Left" Margin="445,362,0,0" TextWrapping="Wrap" Text="Ready" VerticalAlignment="Top" FontSize="14"/>
         <TextBlock x:Name="estimatedTime" HorizontalAlignment="Left" Margin="255,417,0,0" TextWrapping="Wrap" Text="Estimated : " VerticalAlignment="Top" FontSize="14"/>
         <TextBlock x:Name="totalTime" HorizontalAlignment="Left" Margin="484,417,0,0" TextWrapping="Wrap" Text="Total : " VerticalAlignment="Top" FontSize="14"/>
-        <CheckBox x:Name="isTensorRT" Content="TensorRT(faster)" HorizontalAlignment="Left" Margin="71,426,0,0" VerticalAlignment="Top" Checked="isTensorRT_Checked"/>
+        <GroupBox Header="TensorRT" Margin="582,259,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Height="85" Width="117"/>
+        <CheckBox x:Name="isTensorRT" Content="Use(faster)" HorizontalAlignment="Left" Margin="594,286,0,0" VerticalAlignment="Top" Checked="isTensorRT_Checked" Unchecked="isTensorRT_Unchecked"/>
+        <CheckBox x:Name="isFP16" Content="FP16" HorizontalAlignment="Left" Margin="594,306,0,0" VerticalAlignment="Top" IsEnabled="False" Checked="isFP16_Checked" Unchecked="isFP16_Unchecked"/>
 
 
 
