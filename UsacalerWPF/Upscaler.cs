@@ -20,9 +20,11 @@ namespace UpscalerWPF
         public int batchSize = 1;
         public int scale { get; set; } = 2;
         public string filePath = "";
-        public string modelName { get; set; } = "SwinIR-M";
-        private string modelPath = "003_realSR_BSRGAN_DFO_s64w8_SwinIR-M_x2_GAN.ONNX";
-        
+        public bool useTensorRT { get; set; } = false;
+        public bool useFP16 { get; set; } = false;
+        public string modelName { get; set; } = "BSRGAN";
+        private string modelPath = "BSRGANx2.onnx";
+        public string[] TensorRTSupportModels { get; } = { "BSRGAN" };
         public void setModel(string modelName, int scale)
         {
             this.modelName = modelName;
@@ -115,67 +117,38 @@ namespace UpscalerWPF
             return frames;
         }
 
-        private Tensor<Float16> toTensorFP16(Mat[] mat, int height, int width, int batchSize)
-        {
-            // bgr Mat to rgb normalized tensor 
-            // swinIR model option window_size = 8
-            int window_size = 8;
-            int h_pad = 0;
-            int w_pad = 0;
-            if (height % window_size > 0)
-            {
-                h_pad = (height / window_size + 1) * window_size - height;
-            }
-            if (width % window_size > 0)
-            {
-                w_pad = (width / window_size + 1) * window_size - width;
-            }
-
-            Tensor<Float16> tensor = new DenseTensor<Float16>(new[] { batchSize, 3, height + h_pad, width + w_pad });
-
-            for (int b = 0; b < batchSize; b++)
-            {
-                Image<Rgb, byte> tmp = mat[b].ToImage<Rgb, byte>();
-                for (int y = 0; y < height; y++)
-                {
-                    for (int x = 0; x < width; x++)
-                    {
-
-                        tensor[b, 0, y, x] = (Float16)(tmp.Data[y, x, 0] / 255f);
-                        tensor[b, 1, y, x] = (Float16)(tmp.Data[y, x, 1] / 255f);
-                        tensor[b, 2, y, x] = (Float16)(tmp.Data[y, x, 2] / 255f);
-                    }
-                }
-            }
-            return tensor;
-        }
-
-        private Mat[] toMatFP16(Tensor<Float16> tensor, int height, int width, int batchSize)
-        {
-            Mat[] frames = new Mat[batchSize];
-            for (int b = 0; b < batchSize; b++)
-            {
-                var frame = new Mat(height * this.scale, width * this.scale, Emgu.CV.CvEnum.DepthType.Cv8U, 3).ToImage<Rgb, Byte>();
-                for (int y = 0; y < height * this.scale; y++)
-                {
-                    for (int x = 0; x < width * this.scale; x++)
-                    {
-                        frame.Data[y, x, 0] = (byte)(tensor[b, 0, y, x] * 255);
-                        frame.Data[y, x, 1] = (byte)(tensor[b, 1, y, x] * 255);
-                        frame.Data[y, x, 2] = (byte)(tensor[b, 2, y, x] * 255);
-                    }
-                }
-                frames[b] = frame.Mat;
-            }
-            return frames;
-        }
-
         public void DoUpscaling(BackgroundWorker worker, DoWorkEventArgs e)
         {
+            //OrtEnv.Instance().EnvLogLevel = 0;
+            OrtEnv.Instance();
+            OrtTensorRTProviderOptions options = new OrtTensorRTProviderOptions();
+            SessionOptions sessionOptions = new SessionOptions();            
+            options.UpdateOptions(new Dictionary<string, string>() {
+                { "trt_fp16_enable", useFP16? "true" : "false" }, 
+                { "trt_max_partition_iterations", "30" },
+                { "trt_engine_cache_enable", "true" }
+            });
+            
+            if (useTensorRT)
+            {
+                sessionOptions.AppendExecutionProvider_Tensorrt(options);
+            }
+            sessionOptions.AppendExecutionProvider_CUDA();
+            
+            var session = new InferenceSession(modelPath, sessionOptions);
 
-            var session = new InferenceSession(modelPath, SessionOptions.MakeSessionOptionWithCudaProvider(0));
+
+            // session warmup
+            if (useTensorRT)
+            {
+                // minimum range
+                session.Run(new List<NamedOnnxValue> { NamedOnnxValue.CreateFromTensor("input", new DenseTensor<float>(new[] { 1, 3, 160, 160 })) });
+                // maximum range
+                session.Run(new List<NamedOnnxValue> { NamedOnnxValue.CreateFromTensor("input", new DenseTensor<float>(new[] { 1, 3, 720, 1280 })) });
+            }
+
             VideoCapture capture = new VideoCapture(this.filePath);
-                        
+            
             string savePath = "upscaled_" + Path.GetFileName(this.filePath);
             int width = (int)capture.Get(Emgu.CV.CvEnum.CapProp.FrameWidth);
             int height = (int)capture.Get(Emgu.CV.CvEnum.CapProp.FrameHeight);
@@ -193,12 +166,11 @@ namespace UpscalerWPF
                     break;
                 }
             }
-            VideoWriter writer = new VideoWriter(savePath, backend_idx, VideoWriter.Fourcc('H', '2', '6', '4'), fps, size, true);
-            bool isFloat16 = this.modelPath.Contains("fp16");
+            VideoWriter writer = new VideoWriter(savePath, backend_idx, VideoWriter.Fourcc('H', '2', '6', '4'), fps, size, true);            
             Stopwatch stopwatch = new Stopwatch();
             Stopwatch stepwatch = new Stopwatch();
             stopwatch.Start();
-            
+           
             while (true)
             {
                 if (worker.CancellationPending)
@@ -220,37 +192,19 @@ namespace UpscalerWPF
                         frames[i] = frame;
                     }
                     var pos = (int)capture.Get(Emgu.CV.CvEnum.CapProp.PosFrames);
+                                        
+                    
+                    Tensor<float> tensor = toTensor(frames, height, width, lastBatchIdx + 1);
 
-                    if (isFloat16)
+                    var inputs = new List<NamedOnnxValue> {NamedOnnxValue.CreateFromTensor("input", tensor)};
+                    Tensor<float> output = session.Run(inputs).ToList().First().Value as Tensor<float>;
+                    var up_frames = toMat(output, height, width, lastBatchIdx + 1);
+                    
+                    for (int i = 0; i < lastBatchIdx + 1; i++)
                     {
-                        Tensor<Float16> tensor = toTensorFP16(frames, height, width, lastBatchIdx + 1);
-
-                        var inputs = new List<NamedOnnxValue> { NamedOnnxValue.CreateFromTensor("input", tensor) };
-
-                        Tensor<Float16> output = session.Run(inputs).ToList().First().Value as Tensor<Float16>;
-
-                        var up_frames = toMatFP16(output, height, width, lastBatchIdx + 1);
-
-                        for (int i = 0; i < lastBatchIdx + 1; i++)
-                        {
-                            writer.Write(up_frames[i]);
-                        }
+                        writer.Write(up_frames[i]);
                     }
-                    else
-                    {
-                        Tensor<float> tensor = toTensor(frames, height, width, lastBatchIdx + 1);
-
-                        var inputs = new List<NamedOnnxValue> {NamedOnnxValue.CreateFromTensor("input", tensor)};
-
-                        Tensor<float> output = session.Run(inputs).ToList().First().Value as Tensor<float>;
-                        
-                        var up_frames = toMat(output, height, width, lastBatchIdx + 1);
-                        
-                        for (int i = 0; i < lastBatchIdx + 1; i++)
-                        {
-                            writer.Write(up_frames[i]);
-                        }
-                    }
+                    
                     stepwatch.Stop();
                     // finished
                     int futureWork = totalFrame - pos;
@@ -267,7 +221,7 @@ namespace UpscalerWPF
             capture.Dispose();
             writer.Dispose();
             session.Dispose();
-            stopwatch.Stop();
+            stopwatch.Stop();            
             FFmpegConvert(savePath);
         }
         private void FFmpegConvert(string input)
