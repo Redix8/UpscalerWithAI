@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Microsoft.ML.OnnxRuntime;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
@@ -19,9 +20,10 @@ namespace UpscalerWPF
         private Upscaler upscaler;
         private BackgroundWorker inferenceWorker;
         public MainWindow()
-        {
+        {            
             InitializeComponent();
             InitializeBackgroundWorker();
+            OrtEnv.Instance();
         }
         private void Window_Loaded(object sender, RoutedEventArgs e)
         {            
@@ -147,6 +149,11 @@ namespace UpscalerWPF
             if (upscaler == null) return;
             upscaler.scale = 4;
             upscaler.setModel(upscaler.modelName, upscaler.scale);
+        }
+
+        private void isTensorRT_Checked(object sender, RoutedEventArgs e)
+        {
+            upscaler.useTensorRT = (bool)isTensorRT.IsChecked;
         }
     }
 }

@@ -20,8 +20,9 @@ namespace UpscalerWPF
         public int batchSize = 1;
         public int scale { get; set; } = 2;
         public string filePath = "";
-        public string modelName { get; set; } = "SwinIR-M";
-        private string modelPath = "003_realSR_BSRGAN_DFO_s64w8_SwinIR-M_x2_GAN.ONNX";
+        public bool useTensorRT { get; set; } = false;
+        public string modelName { get; set; } = "BSRGAN";
+        private string modelPath = "BSRGANx2.onnx";
         
         public void setModel(string modelName, int scale)
         {
@@ -171,11 +172,37 @@ namespace UpscalerWPF
         }
 
         public void DoUpscaling(BackgroundWorker worker, DoWorkEventArgs e)
-        {
+        {            
+            OrtEnv.Instance().EnvLogLevel = 0;
 
-            var session = new InferenceSession(modelPath, SessionOptions.MakeSessionOptionWithCudaProvider(0));
+            OrtTensorRTProviderOptions options = new OrtTensorRTProviderOptions();
+            Console.WriteLine(options.GetOptions().ToString());
+            options.UpdateOptions(new Dictionary<string, string>() {
+                { "trt_fp16_enable", "true" }, 
+                { "trt_max_partition_iterations", "10" },
+                { "trt_engine_cache_enable", "true" }
+            });
+            Console.WriteLine(options.GetOptions().ToString());
+            //SessionOptions options = useTensorRT ? SessionOptions.MakeSessionOptionWithTensorrtProvider() : SessionOptions.MakeSessionOptionWithCudaProvider();
+            //SessionOptions options = SessionOptions.MakeSessionOptionWithTensorrtProvider();
+            //options.AppendExecutionProvider_CUDA();
+            SessionOptions sessionOptions = new SessionOptions();
+            sessionOptions.AppendExecutionProvider_Tensorrt(options);
+            sessionOptions.AppendExecutionProvider_CUDA();
+            //options    SessionOptions.MakeSessionOptionWithCudaProvider();
+            var session = new InferenceSession(modelPath, sessionOptions);
+
+            // session warmup test
+            // minimum range
+            Console.WriteLine("warmup minimum");
+            session.Run(new List<NamedOnnxValue> { NamedOnnxValue.CreateFromTensor("input", new DenseTensor<float>(new[] { 1, 3, 160, 160 })) });
+            // maximum range            
+            Console.WriteLine("warmup maximum");
+            session.Run(new List<NamedOnnxValue> { NamedOnnxValue.CreateFromTensor("input", new DenseTensor<float>(new[] { 1, 3, 720, 1280 })) });
+            Console.WriteLine("warmup finished");
+
             VideoCapture capture = new VideoCapture(this.filePath);
-                        
+            
             string savePath = "upscaled_" + Path.GetFileName(this.filePath);
             int width = (int)capture.Get(Emgu.CV.CvEnum.CapProp.FrameWidth);
             int height = (int)capture.Get(Emgu.CV.CvEnum.CapProp.FrameHeight);
@@ -198,7 +225,7 @@ namespace UpscalerWPF
             Stopwatch stopwatch = new Stopwatch();
             Stopwatch stepwatch = new Stopwatch();
             stopwatch.Start();
-            
+           
             while (true)
             {
                 if (worker.CancellationPending)
@@ -226,9 +253,9 @@ namespace UpscalerWPF
                         Tensor<Float16> tensor = toTensorFP16(frames, height, width, lastBatchIdx + 1);
 
                         var inputs = new List<NamedOnnxValue> { NamedOnnxValue.CreateFromTensor("input", tensor) };
-
+                        
                         Tensor<Float16> output = session.Run(inputs).ToList().First().Value as Tensor<Float16>;
-
+                        
                         var up_frames = toMatFP16(output, height, width, lastBatchIdx + 1);
 
                         for (int i = 0; i < lastBatchIdx + 1; i++)
@@ -241,9 +268,7 @@ namespace UpscalerWPF
                         Tensor<float> tensor = toTensor(frames, height, width, lastBatchIdx + 1);
 
                         var inputs = new List<NamedOnnxValue> {NamedOnnxValue.CreateFromTensor("input", tensor)};
-
                         Tensor<float> output = session.Run(inputs).ToList().First().Value as Tensor<float>;
-                        
                         var up_frames = toMat(output, height, width, lastBatchIdx + 1);
                         
                         for (int i = 0; i < lastBatchIdx + 1; i++)
@@ -267,7 +292,7 @@ namespace UpscalerWPF
             capture.Dispose();
             writer.Dispose();
             session.Dispose();
-            stopwatch.Stop();
+            stopwatch.Stop();            
             FFmpegConvert(savePath);
         }
         private void FFmpegConvert(string input)
