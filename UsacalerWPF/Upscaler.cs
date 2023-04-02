@@ -101,7 +101,7 @@ namespace UpscalerWPF
             Mat[] frames = new Mat[batchSize];
             for (int b = 0; b<batchSize; b++)
             {
-                var frame = new Mat(height * this.scale, width * this.scale, Emgu.CV.CvEnum.DepthType.Cv8U, 3).ToImage<Rgb, Byte>();
+                var frame = new Mat(height * this.scale, width * this.scale, Emgu.CV.CvEnum.DepthType.Cv8U, 3).ToImage<Rgb, Byte>();                
                 Parallel.For(0, height * this.scale, y =>
                 {
                     for (int x = 0; x < width * this.scale; x++)
@@ -116,9 +116,10 @@ namespace UpscalerWPF
             return frames;
         }
 
-        public void DoUpscaling(BackgroundWorker worker, DoWorkEventArgs e)
+        public bool DoUpscaling(BackgroundWorker worker, DoWorkEventArgs e)
         {
             //OrtEnv.Instance().EnvLogLevel = 0;
+            bool success = false;
             OrtEnv.Instance();
             OrtTensorRTProviderOptions options = new OrtTensorRTProviderOptions();
             SessionOptions sessionOptions = new SessionOptions();            
@@ -174,7 +175,7 @@ namespace UpscalerWPF
             {
                 if (worker.CancellationPending)
                 {
-                    e.Cancel = true;
+                    e.Cancel = true;                    
                     break;
                 }
                 else
@@ -214,19 +215,24 @@ namespace UpscalerWPF
                     String[] time = {stopwatch.Elapsed.ToString(format), workingTime.ToString(format), "Video Converting"};
                     worker.ReportProgress(percentComplete, time);
                     stepwatch.Reset();
-                    if (pos == totalFrame) break;
+                    if (pos == totalFrame)
+                    {
+                        success = true;
+                        break;
+                    }
                 }                
             }
             capture.Dispose();
-            writer.Dispose();
+            writer.Dispose();            
             session.Dispose();
-            stopwatch.Stop();            
-            FFmpegConvert(savePath);
+            stopwatch.Stop();
+            return success;
         }
-        private void FFmpegConvert(string input)
+        public void FFmpegConvert()
         {
+            string upscaledPath = "upscaled_" + Path.GetFileName(this.filePath);
             Process proc = new Process();
-            string cmd = $"-i {filePath} -i {input} -map 1:v -map 0:a -c:a copy -c:v libx264 -pix_fmt yuv420p -progress nostat encoded_{input}";
+            string cmd = $"-i {filePath} -i {upscaledPath} -map 1:v -map 0:a -c:a copy -c:v libx264 -pix_fmt yuv420p -progress nostat encoded_{Path.GetFileName(this.filePath)}";
             proc.StartInfo.FileName = ".\\ffmpeg\\bin\\ffmpeg.exe";
             proc.StartInfo.Arguments = cmd;
             proc.StartInfo.UseShellExecute = false;
@@ -238,7 +244,9 @@ namespace UpscalerWPF
             StreamReader sr = proc.StandardError;
             while (!sr.EndOfStream)
             {
-                getTotalSecondProcessed(sr.ReadLine());
+                var line = sr.ReadLine();
+                Console.WriteLine(line);
+                getTotalSecondProcessed(line);
             }            
         }
 

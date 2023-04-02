@@ -43,8 +43,11 @@ namespace UpscalerWPF
         {
             // Get the BackgroundWorker that raised this event.
             BackgroundWorker worker = sender as BackgroundWorker;
-            this.upscaler.DoUpscaling(worker, e);
-            //this.upscaler.demuxing(worker, e);
+            var success = this.upscaler.DoUpscaling(worker, e);
+            if (success)
+            {
+                this.upscaler.FFmpegConvert();
+            }            
         }
         private void inferenceWorker_RunWorkerCompleted(object sender, RunWorkerCompletedEventArgs e)
         {
