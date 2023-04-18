@@ -83,14 +83,13 @@ namespace UpscalerWPF
             for (int b = 0; b<batchSize; b++)
             {
                 Image<Rgb, byte> tmp = mat[b].ToImage<Rgb, byte>();
-                Parallel.For(0, height, y =>
+                Parallel.For(0, height * width, pos =>                
                 {
-                    for (int x = 0; x < width; x++)
-                    {
-                        tensor[b, 0, y, x] = tmp.Data[y, x, 0] / 255f;
-                        tensor[b, 1, y, x] = tmp.Data[y, x, 1] / 255f;
-                        tensor[b, 2, y, x] = tmp.Data[y, x, 2] / 255f;
-                    }
+                    int y = pos / height;
+                    int x = pos % height;                    
+                    tensor[b, 0, y, x] = tmp.Data[y, x, 0] / 255f;
+                    tensor[b, 1, y, x] = tmp.Data[y, x, 1] / 255f;
+                    tensor[b, 2, y, x] = tmp.Data[y, x, 2] / 255f;                    
                 });                
             }            
             return tensor;
@@ -101,15 +100,14 @@ namespace UpscalerWPF
             Mat[] frames = new Mat[batchSize];
             for (int b = 0; b<batchSize; b++)
             {
-                var frame = new Mat(height * this.scale, width * this.scale, Emgu.CV.CvEnum.DepthType.Cv8U, 3).ToImage<Rgb, Byte>();                
-                Parallel.For(0, height * this.scale, y =>
+                var frame = new Mat(height, width, Emgu.CV.CvEnum.DepthType.Cv8U, 3).ToImage<Rgb, Byte>();                
+                Parallel.For(0, height * width, pos =>
                 {
-                    for (int x = 0; x < width * this.scale; x++)
-                    {
-                        frame.Data[y, x, 0] = (byte)(clamp(tensor[b, 0, y, x], 0, 1) * 255);
-                        frame.Data[y, x, 1] = (byte)(clamp(tensor[b, 1, y, x], 0, 1) * 255);
-                        frame.Data[y, x, 2] = (byte)(clamp(tensor[b, 2, y, x], 0, 1) * 255);
-                    }
+                    int y = pos / height;
+                    int x = pos % height;                    
+                    frame.Data[y, x, 0] = (byte)(clamp(tensor[b, 0, y, x], 0, 1) * 255);
+                    frame.Data[y, x, 1] = (byte)(clamp(tensor[b, 1, y, x], 0, 1) * 255);
+                    frame.Data[y, x, 2] = (byte)(clamp(tensor[b, 2, y, x], 0, 1) * 255);                    
                 });
                 frames[b] = frame.Mat;
             }            
@@ -198,7 +196,7 @@ namespace UpscalerWPF
                     
                     var inputs = new List<NamedOnnxValue> {NamedOnnxValue.CreateFromTensor("input", tensor)};
                     Tensor<float> output = session.Run(inputs).ToList().First().Value as Tensor<float>;
-                    var up_frames = toMat(output, height, width, lastBatchIdx + 1);
+                    var up_frames = toMat(output, height * this.scale, width * this.scale, lastBatchIdx + 1);
                     
                     for (int i = 0; i < lastBatchIdx + 1; i++)
                     {
